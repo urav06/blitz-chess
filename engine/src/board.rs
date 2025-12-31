@@ -1,7 +1,8 @@
 //! Chess board representation and core data structures.
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::ops::{Index, IndexMut};
+use std::mem::replace;
+use std::ops::{Index, IndexMut, Not};
 
 use crate::display::{render_board, render_piece, render_square};
 
@@ -12,21 +13,23 @@ use crate::display::{render_board, render_piece, render_square};
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum PieceType {
-    Pawn    = 1,
-    Knight  = 2,
-    Bishop  = 3,
-    Rook    = 4,
-    Queen   = 5,
-    King    = 6,
+    Knight = 0b000,
+    Bishop = 0b001,
+    Rook   = 0b010,
+    Queen  = 0b011,
+    Pawn   = 0b100,
+    King   = 0b101,
 }
 
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Color { White = 0, Black = 1 }
 
+#[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Piece(u8);
 
+#[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Square(u8);
 
@@ -34,10 +37,23 @@ pub struct Square(u8);
 pub struct Board { squares: [u8; 64] }
 
 // ============================================================================
+// Color
+// ============================================================================
+
+// --- Traits --- //
+impl Not for Color {
+    type Output = Self;
+    fn not(self) -> Self {
+        match self { Color::White => Color::Black, Color::Black => Color::White }
+    }
+}
+
+// ============================================================================
 // Square
 // ============================================================================
 
 impl Square {
+
     // --- Construction --- //
     pub const fn from_coords(rank: u8, file: u8) -> Self { Square((rank << 3) | file) }
     pub const fn from_index(index: usize) -> Self { Square(index as u8) }
@@ -46,6 +62,15 @@ impl Square {
     pub const fn rank(self) -> u8 { self.0 >> 3 }
     pub const fn file(self) -> u8 { self.0 & 0b111 }
     pub const fn index(self) -> usize { self.0 as usize }
+
+    // --- Validation --- //
+    pub const fn in_bounds(rank: i8, file: i8) -> bool { rank >= 0 && rank < 8 && file >= 0 && file < 8 }
+
+    // --- Geometry --- //
+    pub const fn offset(self, dr: i8, df: i8) -> Option<Self> {
+        let (r, f) = (self.rank() as i8 + dr, self.file() as i8 + df);
+        if Self::in_bounds(r, f) { Some(Self::from_coords(r as u8, f as u8)) } else { None }
+    }
 }
 
 // --- Traits --- //
@@ -67,6 +92,24 @@ impl From<Square> for (u8, u8) {
 
 impl Display for Square {
     fn fmt(&self, f: &mut Formatter) -> FmtResult { render_square(self, f) }
+}
+
+// ============================================================================
+// PieceType
+// ============================================================================
+
+impl PieceType {
+    pub const fn from_u8(value: u8) -> Self {
+        match value {
+            0b000 => Self::Knight,
+            0b001 => Self::Bishop,
+            0b010 => Self::Rook,
+            0b011 => Self::Queen,
+            0b100 => Self::Pawn,
+            0b101 => Self::King,
+            _ => unreachable!(),
+        }
+    }
 }
 
 // ============================================================================
@@ -92,18 +135,7 @@ impl Piece {
     // --- Extraction --- //
     pub const fn value(self) -> u8 { self.0 }
     pub const fn has_moved(self) -> bool { self.0 & Self::MOVED_BIT != 0 }
-
-    pub const fn piece_type(self) -> PieceType {
-        match self.0 & Self::PIECE_MASK {
-            1 => PieceType::Pawn,
-            2 => PieceType::Knight,
-            3 => PieceType::Bishop,
-            4 => PieceType::Rook,
-            5 => PieceType::Queen,
-            6 => PieceType::King,
-            _ => unreachable!(),
-        }
-    }
+    pub const fn piece_type(self) -> PieceType { PieceType::from_u8(self.0 & Self::PIECE_MASK) }
 
     pub const fn color(self) -> Color {
         if self.0 & Self::COLOR_BIT != 0 { Color::Black } else { Color::White }
@@ -142,24 +174,21 @@ impl Board {
     pub fn piece_at(&self, s: impl Into<Square>) -> Option<Piece> { Piece::from_value(self[s]) }
     pub fn is_empty(&self, s: impl Into<Square>) -> bool { Piece::is_empty_value(self[s]) }
 
-    // --- Modifications --- //
-    pub fn with_piece(mut self, p: Piece, s: impl Into<Square>) -> Self {
-        self[s] = p.into();
-        self
-    }
-    pub fn without_piece(mut self, s: impl Into<Square>) -> Self {
-        self[s] = 0;
-        self
+    pub fn pieces(&self) -> impl Iterator<Item = (Square, Piece)> + '_ {
+        (0..64).map(Square::from_index).filter_map(|sq| self.piece_at(sq).map(|p| (sq, p)))
     }
 
-    pub fn with_move(mut self, from: impl Into<Square>, to: impl Into<Square>) -> Self {
-        let from = from.into();
-        let to = to.into();
-        if let Some(piece) = self.piece_at(from) {
-            self[from] = 0;
-            self[to] = piece.with_moved().value();
-        }
-        self
+    // --- Mutations --- //
+    pub fn set_piece(&mut self, p: Piece, s: impl Into<Square>) -> Option<Piece> {
+        Piece::from_value(replace(&mut self[s], p.into()))
+    }
+
+    pub fn remove_piece(&mut self, s: impl Into<Square>) -> Option<Piece> {
+        Piece::from_value(replace(&mut self[s], 0))
+    }
+
+    pub fn move_piece(&mut self, from: impl Into<Square>, to: impl Into<Square>) -> Option<Piece> {
+        self.remove_piece(from).and_then(|piece| self.set_piece(piece.with_moved(), to))
     }
 }
 
