@@ -2,7 +2,7 @@
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::mem::replace;
-use std::ops::{Index, IndexMut, Not};
+use std::ops::{Add, Index, IndexMut, Not};
 
 use crate::display::{render_board, render_piece, render_square};
 
@@ -24,6 +24,14 @@ pub enum PieceType {
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Color { White = 0, Black = 1 }
+
+#[repr(i8)]
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum Lateral {
+    Left        = -1,
+    Straight    = 0,
+    Right       = 1,
+}
 
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -59,6 +67,7 @@ impl Square {
     pub const fn from_index(index: usize) -> Self { Square(index as u8) }
 
     // --- Extraction --- //
+    pub const fn value(self) -> u8 { self.0 }
     pub const fn rank(self) -> u8 { self.0 >> 3 }
     pub const fn file(self) -> u8 { self.0 & 0b111 }
     pub const fn index(self) -> usize { self.0 as usize }
@@ -70,6 +79,14 @@ impl Square {
     pub const fn offset(self, dr: i8, df: i8) -> Option<Self> {
         let (r, f) = (self.rank() as i8 + dr, self.file() as i8 + df);
         if Self::in_bounds(r, f) { Some(Self::from_coords(r as u8, f as u8)) } else { None }
+    }
+
+    pub const fn forward(self, color: Color, steps: i8, lateral: Lateral) -> Option<Self> {
+        let (dr, df) = match color {
+            Color::White => (steps, lateral as i8),
+            Color::Black => (-steps, -(lateral as i8)),
+        };
+        self.offset(dr, df)
     }
 }
 
@@ -94,12 +111,28 @@ impl Display for Square {
     fn fmt(&self, f: &mut Formatter) -> FmtResult { render_square(self, f) }
 }
 
+impl Add<(i8, i8)> for Square {
+    type Output = Option<Square>;
+    fn add(self, (dr, df): (i8, i8)) -> Option<Square> {
+        self.offset(dr, df)
+    }
+}
+
 // ============================================================================
 // PieceType
 // ============================================================================
 
 impl PieceType {
-    pub const fn from_u8(value: u8) -> Self {
+
+    /// Pieces a pawn can promote to. These are exactly the pieces where MSB is 0.
+    pub const PROMOTABLE: [PieceType; 4] = [
+        PieceType::Knight,
+        PieceType::Bishop,
+        PieceType::Rook,
+        PieceType::Queen,
+    ];
+
+    pub(crate) const fn from_u8(value: u8) -> Self {
         match value {
             0b000 => Self::Knight,
             0b001 => Self::Bishop,

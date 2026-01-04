@@ -1,6 +1,7 @@
-//! Chess move representation.
+//! Chess move representation. "move" is a reserved keyword in Rust, so we use "mv".
 
 use crate::board::{PieceType, Square};
+use crate::castling::CastlingSide;
 
 // ============================================================================
 // Type Definitions
@@ -48,13 +49,13 @@ impl Move {
 
     // --- Construction --- //
     pub const fn new(source: Square, target: Square) -> Self {
-        Self( (source as u16) | ((target as u16) << 6) )
+        Self( (source.value() as u16) | ((target.value() as u16) << 6) )
     }
 
     pub const fn promotion(source: Square, target: Square, promoted_to: PieceType) -> Self {
         Self(
-            (source as u16)
-            | ((target as u16) << 6)
+            (source.value() as u16)
+            | ((target.value() as u16) << 6)
             | ((promoted_to as u16) << 12)
             | ((MoveType::Promotion as u16) << 14)
         )
@@ -62,16 +63,16 @@ impl Move {
 
     pub const fn en_passant(source: Square, target: Square) -> Self {
         Self(
-            (source as u16)
-            | ((target as u16) << 6)
+            (source.value() as u16)
+            | ((target.value() as u16) << 6)
             | ((MoveType::EnPassant as u16) << 14)
         )
     }
 
     pub const fn castling(source: Square, target: Square) -> Self {
         Self(
-            (source as u16)
-            | ((target as u16) << 6)
+            (source.value() as u16)
+            | ((target.value() as u16) << 6)
             | ((MoveType::Castling as u16) << 14)
         )
     }
@@ -94,5 +95,23 @@ impl Move {
             MoveType::Promotion => Some(PieceType::from_u8(((self.0 >> 12) & 0b11) as u8)),
             _ => None
         }
+    }
+
+    // --- Derived (for special move types) --- //
+    pub const fn castling_side(self) -> CastlingSide {
+        if self.target().file() > self.source().file() { CastlingSide::Kingside } else { CastlingSide::Queenside }
+    }
+
+    pub const fn castling_rook_squares(self) -> (Square, Square) {
+        let side = self.castling_side();
+        let rank = self.source().rank();
+        (
+            Square::from_coords(rank, side.rook_source_file()),
+            Square::from_coords(rank, side.rook_target_file()),
+        )
+    }
+
+    pub const fn en_passant_capture(self) -> Square {
+        Square::from_coords(self.source().rank(), self.target().file())
     }
 }
