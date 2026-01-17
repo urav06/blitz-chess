@@ -46,7 +46,7 @@ pub fn render_board(board: &Board, f: &mut Formatter) -> Result {
 
         for file in 0..8 {
             let square = Square::from_coords(rank, file);
-            match board.piece_at(square) {
+            match board[square] {
                 Some(piece) => write!(f, "{} ", piece)?,
                 None => write!(f, "{} ", EMPTY)?,
             }

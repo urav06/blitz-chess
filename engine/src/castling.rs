@@ -35,6 +35,13 @@ impl CastlingSide {
     pub const fn rook_target_file(self) -> u8 { Self::ROOK_TARGETS[self as usize] }
     pub const fn corridor_files(self) -> &'static [u8] { Self::CORRIDORS[self as usize] }
     pub const fn king_path_files(self) -> &'static [u8] { Self::KING_PATHS[self as usize] }
+
+    /// Returns the castling side if this file is a rook home file.
+    pub const fn from_rook_file(file: u8) -> Option<Self> {
+        if file == Self::ROOK_SOURCES[Self::Kingside as usize] { return Some(Self::Kingside); }
+        if file == Self::ROOK_SOURCES[Self::Queenside as usize] { return Some(Self::Queenside); }
+        None
+    }
 }
 
 // ============================================================================

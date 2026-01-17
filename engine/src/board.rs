@@ -1,8 +1,8 @@
 //! Chess board representation and core data structures.
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::mem::replace;
-use std::ops::{Add, Index, IndexMut, Not};
+use std::num::NonZeroU8;
+use std::ops::{Add, Index, IndexMut, Not, Sub};
 
 use crate::display::{render_board, render_piece, render_square};
 
@@ -35,14 +35,14 @@ pub enum Lateral {
 
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq)]
-pub struct Piece(u8);
+pub struct Piece(NonZeroU8);
 
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Square(u8);
 
 #[derive(Clone)]
-pub struct Board { squares: [u8; 64] }
+pub struct Board { squares: [Option<Piece>; 64] }
 
 // ============================================================================
 // Color
@@ -118,6 +118,13 @@ impl Add<(i8, i8)> for Square {
     }
 }
 
+impl Sub<Square> for Square {
+    type Output = (i8, i8);
+    fn sub(self, other: Square) -> (i8, i8) {
+        (self.rank() as i8 - other.rank() as i8, self.file() as i8 - other.file() as i8)
+    }
+}
+
 // ============================================================================
 // PieceType
 // ============================================================================
@@ -152,45 +159,28 @@ impl PieceType {
 impl Piece {
     // --- Bit encoding scheme --- //
     const OCCUPIED_BIT  : u8 = 0b1000_0000; // Bit 7
-    const MOVED_BIT     : u8 = 0b0100_0000; // Bit 6
     const COLOR_BIT     : u8 = 0b0000_1000; // Bit 3
     const PIECE_MASK    : u8 = 0b0000_0111; // Bits 2-0
 
     // --- Construction --- //
     pub const fn new(piece_type: PieceType, color: Color) -> Self {
-        Piece(Self::OCCUPIED_BIT | ((color as u8) << 3) | (piece_type as u8))
-    }
-
-    pub const fn from_value(value: u8) -> Option<Self> {
-        if Self::is_empty_value(value) { None } else { Some(Piece(value)) }
+        let bits = Self::OCCUPIED_BIT | ((color as u8) << 3) | (piece_type as u8);
+        unsafe { Piece(NonZeroU8::new_unchecked(bits)) }  // OCCUPIED_BIT guarantees non-zero value
     }
 
     // --- Extraction --- //
-    pub const fn value(self) -> u8 { self.0 }
-    pub const fn has_moved(self) -> bool { self.0 & Self::MOVED_BIT != 0 }
-    pub const fn piece_type(self) -> PieceType { PieceType::from_u8(self.0 & Self::PIECE_MASK) }
+    pub const fn piece_type(self) -> PieceType { PieceType::from_u8(self.0.get() & Self::PIECE_MASK) }
 
     pub const fn color(self) -> Color {
-        if self.0 & Self::COLOR_BIT != 0 { Color::Black } else { Color::White }
+        if self.0.get() & Self::COLOR_BIT != 0 { Color::Black } else { Color::White }
     }
 
-    // --- Modifications --- //
-    pub const fn with_moved(self) -> Self { Piece(self.0 | Self::MOVED_BIT) }
-
-    // --- Utilities --- //
-    pub const fn is_empty_value(value: u8) -> bool { value & Self::OCCUPIED_BIT == 0 }
+    // --- Type Checks --- //
+    pub const fn is_pawn(self) -> bool { self.piece_type() as u8 == PieceType::Pawn as u8 }
+    pub const fn is_king(self) -> bool { self.piece_type() as u8 == PieceType::King as u8 }
 }
 
 // --- Traits --- //
-impl From<Piece> for u8 {
-    fn from(piece: Piece) -> u8 { piece.value() }
-}
-
-impl TryFrom<u8> for Piece {
-    type Error = ();
-    fn try_from(value: u8) -> Result<Self, ()> { Piece::from_value(value).ok_or(()) }
-}
-
 impl Display for Piece {
     fn fmt(&self, f: &mut Formatter) -> FmtResult { render_piece(self, f) }
 }
@@ -201,38 +191,38 @@ impl Display for Piece {
 
 impl Board {
     // --- Construction --- //
-    pub const fn new() -> Self { Board { squares: [0; 64] } }
+    pub const fn new() -> Self { Board { squares: [None; 64] } }
 
     // --- Queries --- //
-    pub fn piece_at(&self, s: impl Into<Square>) -> Option<Piece> { Piece::from_value(self[s]) }
-    pub fn is_empty(&self, s: impl Into<Square>) -> bool { Piece::is_empty_value(self[s]) }
-
     pub fn pieces(&self) -> impl Iterator<Item = (Square, Piece)> + '_ {
-        (0..64).map(Square::from_index).filter_map(|sq| self.piece_at(sq).map(|p| (sq, p)))
+        (0..64).map(Square::from_index).filter_map(|sq| self[sq].map(|p| (sq, p)))
     }
 
     // --- Mutations --- //
-    pub fn set_piece(&mut self, p: Piece, s: impl Into<Square>) -> Option<Piece> {
-        Piece::from_value(replace(&mut self[s], p.into()))
-    }
-
-    pub fn remove_piece(&mut self, s: impl Into<Square>) -> Option<Piece> {
-        Piece::from_value(replace(&mut self[s], 0))
-    }
-
     pub fn move_piece(&mut self, from: impl Into<Square>, to: impl Into<Square>) -> Option<Piece> {
-        self.remove_piece(from).and_then(|piece| self.set_piece(piece.with_moved(), to))
+        self[from].lift().and_then(|piece| self[to].place(piece))
     }
 }
 
 // --- Traits --- //
+pub trait SquareExt {
+    fn place(&mut self, piece: Piece) -> Option<Piece>;
+    fn lift(&mut self) -> Option<Piece>;
+}
+
+impl SquareExt for Option<Piece> {
+    fn place(&mut self, piece: Piece) -> Option<Piece> { self.replace(piece) }
+    fn lift(&mut self) -> Option<Piece> { self.take() }
+}
+
 impl<T: Into<Square>> Index<T> for Board {
-    type Output = u8;
-    fn index(&self, s: T) -> &u8 { &self.squares[s.into().index()] }
+    type Output = Option<Piece>;
+
+    fn index(&self, s: T) -> &Option<Piece> { &self.squares[s.into().index()] }
 }
 
 impl<T: Into<Square>> IndexMut<T> for Board {
-    fn index_mut(&mut self, s: T) -> &mut u8 { &mut self.squares[s.into().index()] }
+    fn index_mut(&mut self, s: T) -> &mut Option<Piece> { &mut self.squares[s.into().index()] }
 }
 
 impl Display for Board {

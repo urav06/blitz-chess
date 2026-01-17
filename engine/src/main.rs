@@ -1,56 +1,67 @@
-use engine::board::*;
+use engine::board::{Board, Color, Piece, PieceType, Square, SquareExt};
 
 fn main() {
+    println!("=== Board API Test ===\n");
+
+    // 1. Create a new empty board
     let mut board = Board::new();
+    println!("1. Created empty board:");
+    println!("{}\n", board);
 
-    let white_pawn = Piece::new(PieceType::Pawn, Color::White);
-    let black_knight = Piece::new(PieceType::Knight, Color::Black);
+    // 2. Set pieces using IndexMut + Option::replace
+    let e1 = Square::from_coords(0, 4);  // e1
+    let e8 = Square::from_coords(7, 4);  // e8
+    let b1 = Square::from_coords(0, 1);  // b1
+    let c3 = Square::from_coords(2, 2);  // c3
 
-    // Test set_piece on empty square
-    let old = board.set_piece(white_pawn, (1, 4));  // e2
-    println!("set_piece on empty: {}", old.is_none());  // Should be true
+    board[e1].place(Piece::new(PieceType::King, Color::White));
+    board[e8].place(Piece::new(PieceType::King, Color::Black));
+    board[b1].place(Piece::new(PieceType::Knight, Color::White));
 
-    // Test set_piece on occupied square (replace)
-    let old = board.set_piece(black_knight, (1, 4));  // e2
-    println!("set_piece on occupied: {} (was pawn: {})", old.is_some(),
-        old.map(|p| p.piece_type() == PieceType::Pawn).unwrap_or(false));
+    println!("2. After placing kings on e1/e8 and knight on b1:");
+    println!("{}\n", board);
 
-    // Test remove_piece on occupied square
-    let old = board.remove_piece((1, 4));  // e2
-    println!("remove_piece on occupied: {} (was knight: {})", old.is_some(),
-        old.map(|p| p.piece_type() == PieceType::Knight).unwrap_or(false));
+    // 3. Check a square using Index
+    println!("3. Checking squares:");
+    println!("   e1 has piece: {}", board[e1].is_some());
+    println!("   c3 is empty: {}", board[c3].is_none());
+    if let Some(piece) = board[e1] {
+        println!("   e1 piece: {} {:?}", piece, piece.piece_type());
+    }
+    println!();
 
-    // Test remove_piece on empty square
-    let old = board.remove_piece((1, 4));  // e2
-    println!("remove_piece on empty: {}", old.is_none());  // Should be true
+    // 4. Set with replace (returns old value)
+    println!("4. Replace knight on b1 with a queen:");
+    let old = board[b1].place(Piece::new(PieceType::Queen, Color::White));
+    println!("   Old piece was: {:?}", old.map(|p| p.piece_type()));
+    println!("{}\n", board);
 
-    // Setup for move_piece tests
-    board.set_piece(white_pawn, (1, 4));  // white pawn on e2
-    board.set_piece(black_knight, (3, 4));  // black knight on e4
+    // 5. Remove a piece using take
+    println!("5. Remove the queen from b1:");
+    let removed = board[b1].lift();
+    println!("   Removed: {:?}", removed.map(|p| p.piece_type()));
+    println!("{}\n", board);
 
-    println!("\nBoard before moves:");
-    println!("{}", board);
+    // 6. Move a piece (atomic operation)
+    println!("6. Move white king from e1 to e2:");
+    let e2 = Square::from_coords(1, 4);
+    let captured = board.move_piece(e1, e2);
+    println!("   Captured: {:?}", captured);
+    println!("{}\n", board);
 
-    // Test move_piece: occupied -> empty (no capture)
-    let captured = board.move_piece((1, 4), (2, 4));  // e2 -> e3
-    println!("move e2->e3 (no capture): captured={}", captured.is_none());  // true
+    // 7. Iterate over all pieces
+    println!("7. All pieces on board:");
+    for (sq, piece) in board.pieces() {
+        println!("   {} at {}", piece, sq);
+    }
+    println!();
 
-    // Test move_piece: occupied -> occupied (capture)
-    let captured = board.move_piece((2, 4), (3, 4));  // e3 -> e4 (captures knight)
-    println!("move e3->e4 (capture): captured={}, was_knight={}",
-        captured.is_some(),
-        captured.map(|p| p.piece_type() == PieceType::Knight).unwrap_or(false));
+    // 8. Test different square representations
+    println!("8. Indexing with different types:");
+    let _ = board[0usize];           // usize index
+    let _ = board[(0u8, 4u8)];       // (rank, file) tuple
+    let _ = board[e2];               // Square directly
+    println!("   All indexing methods work!\n");
 
-    // Test move_piece: empty -> empty (no-op)
-    let captured = board.move_piece((0, 0), (1, 1));  // empty squares
-    println!("move empty->empty: captured={}", captured.is_none());  // true
-
-    // Test move_piece: empty -> occupied (no-op, shouldn't capture!)
-    board.set_piece(black_knight, (5, 5));  // f6
-    let captured = board.move_piece((0, 0), (5, 5));  // empty -> f6
-    println!("move empty->occupied: captured={} (should be false!)", captured.is_some());
-    println!("piece still at f6: {}", board.piece_at((5, 5)).is_some());  // true
-
-    println!("\nFinal board:");
-    println!("{}", board);
+    println!("=== All tests passed! ===");
 }

@@ -1,3 +1,5 @@
+#![feature(gen_blocks)]
+
 pub mod board;
 pub mod castling;
 pub mod mv;

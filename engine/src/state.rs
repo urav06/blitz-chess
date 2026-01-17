@@ -1,20 +1,22 @@
 //! Chess game state.
 
-use crate::board::{Board, Color, Lateral, Piece, PieceType, Square};
-use crate::castling::CastlingRights;
+use crate::board::{Board, Color, Lateral, Piece, Square, SquareExt};
+use crate::castling::{CastlingRights, CastlingSide};
+use crate::mobility::MoveGenerator;
 use crate::mv::{Move, MoveType};
 
 // ============================================================================
 // Type Definitions
 // ============================================================================
 
+#[derive(Clone)]
 pub struct State {
-    pub board: Board,
-    pub to_move: Color,
-    pub castling_rights: CastlingRights,
-    pub en_passant: Option<Square>,
-    pub halfmove_clock: u8,
-    pub fullmove_number: u16,
+    pub(crate) board: Board,
+    pub(crate) to_move: Color,
+    pub(crate) castling_rights: CastlingRights,
+    pub(crate) en_passant: Option<Square>,
+    pub(crate) halfmove_clock: u8,
+    pub(crate) fullmove_number: u16,
 }
 
 // ============================================================================
@@ -24,92 +26,77 @@ pub struct State {
 impl State {
 
     // --- Public Interface --- //
+    pub fn apply_move(mut self, mv: Move) -> Self {
+        let piece = self.board[mv.source()].unwrap();
+        let captured = self.execute_board(mv);
 
-    /// Apply a move, consuming the current state and returning the new state.
-    pub fn apply_move(self, mv: Move) -> Self {
+        self.en_passant = self.resulting_en_passant(mv, piece);
+        self.halfmove_clock = if piece.is_pawn() || captured.is_some() { 0 } else { self.halfmove_clock + 1 };
+        self.castling_rights = self.resulting_castling(mv, piece, captured);
+        self.fullmove_number += (self.to_move == Color::Black) as u16;
+        self.to_move = !self.to_move;
+
+        self
+    }
+
+    // --- Board Execution --- //
+    fn execute_board(&mut self, mv: Move) -> Option<Piece> {
         match mv.move_type() {
-            MoveType::Normal    => self.apply_normal(mv),
-            MoveType::Promotion => self.apply_promotion(mv),
-            MoveType::EnPassant => self.apply_en_passant(mv),
-            MoveType::Castling  => self.apply_castling(mv),
+            MoveType::Normal => self.board.move_piece(mv.source(), mv.target()),
+            MoveType::Promotion => {
+                self.board[mv.source()].lift();
+                let promoted = Piece::new(mv.promotion_piece().unwrap(), self.to_move);
+                self.board[mv.target()].place(promoted)
+            }
+            MoveType::EnPassant => {
+                self.board.move_piece(mv.source(), mv.target());
+                self.board[mv.en_passant_capture()].lift()
+            }
+            MoveType::Castling => {
+                self.board.move_piece(mv.source(), mv.target());
+                let (rf, rt) = mv.castling_rook_squares();
+                self.board.move_piece(rf, rt)
+            }
         }
     }
 
-    // --- Move Type Handlers --- //
-
-    fn apply_normal(mut self, mv: Move) -> Self {
-        let piece = self.board.piece_at(mv.source()).unwrap();
-        let captured = self.board.move_piece(mv.source(), mv.target());
-        let is_pawn = piece.piece_type() == PieceType::Pawn;
-
-        State {
-            to_move: !self.to_move,
-            castling_rights: self.castling_rights,  // TODO: update
-            en_passant: self.resulting_en_passant(mv, piece),
-            halfmove_clock: if is_pawn || captured.is_some() { 0 } else { self.halfmove_clock + 1 },
-            fullmove_number: self.fullmove_number + (self.to_move == Color::Black) as u16,
-            ..self
-        }
-    }
-
-    fn apply_promotion(mut self, mv: Move) -> Self {
-        let _captured = self.board.remove_piece(mv.target());  // TODO: for castling rights
-        self.board.remove_piece(mv.source());
-        let promoted = Piece::new(mv.promotion_piece().unwrap(), self.to_move).with_moved();
-        self.board.set_piece(promoted, mv.target());
-
-        State {
-            to_move: !self.to_move,
-            castling_rights: self.castling_rights,  // TODO: update
-            en_passant: None,
-            halfmove_clock: 0,  // pawn move
-            fullmove_number: self.fullmove_number + (self.to_move == Color::Black) as u16,
-            ..self
-        }
-    }
-
-    fn apply_en_passant(mut self, mv: Move) -> Self {
-        self.board.move_piece(mv.source(), mv.target());
-        self.board.remove_piece(mv.en_passant_capture());
-
-        State {
-            to_move: !self.to_move,
-            castling_rights: self.castling_rights,
-            en_passant: None,
-            halfmove_clock: 0,  // pawn move + capture
-            fullmove_number: self.fullmove_number + (self.to_move == Color::Black) as u16,
-            ..self
-        }
-    }
-
-    fn apply_castling(mut self, mv: Move) -> Self {
-        self.board.move_piece(mv.source(), mv.target());
-        let (rook_from, rook_to) = mv.castling_rook_squares();
-        self.board.move_piece(rook_from, rook_to);
-
-        State {
-            to_move: !self.to_move,
-            castling_rights: self.castling_rights.lose_all(self.to_move),
-            en_passant: None,
-            halfmove_clock: self.halfmove_clock + 1,
-            fullmove_number: self.fullmove_number + (self.to_move == Color::Black) as u16,
-            ..self
-        }
-    }
-
-    // --- Helpers --- //
-
+    // --- Derived State Computations --- //
     fn resulting_en_passant(&self, mv: Move, piece: Piece) -> Option<Square> {
-        if piece.piece_type() != PieceType::Pawn {
-            return None;
-        }
-
-        let is_double_push = (mv.target().rank() as i8 - mv.source().rank() as i8).abs() == 2;
-        if !is_double_push {
-            return None;
-        }
-
-        // En passant square is the square the pawn skipped over
+        if !piece.is_pawn() { return None; }
+        if (mv.target() - mv.source()).0.abs() != 2 { return None; }
         mv.source().forward(self.to_move, 1, Lateral::Straight)
+    }
+
+    fn resulting_castling(&self, mv: Move, piece: Piece, _captured: Option<Piece>) -> CastlingRights {
+        if piece.is_king() { return self.castling_rights.lose_all(self.to_move); }
+        
+        let mut rights = self.castling_rights;
+        
+        // Rook moved from home square
+        if let Some(side) = self.rook_home_side(mv.source(), self.to_move) {
+            rights = rights.lose(self.to_move, side);
+        }
+        // Piece captured on opponent's home rook square
+        if let Some(side) = self.rook_home_side(mv.target(), !self.to_move) {
+            rights = rights.lose(!self.to_move, side);
+        }
+        
+        rights
+    }
+
+    fn rook_home_side(&self, square: Square, color: Color) -> Option<CastlingSide> {
+        let home_rank = if color == Color::White { 0 } else { 7 };
+        if square.rank() != home_rank { return None; }
+        CastlingSide::from_rook_file(square.file())
+    }
+}
+
+// ============================================================================
+// State — Move Generation
+// ============================================================================
+
+impl State {
+    pub fn moves(&self) -> MoveGenerator<'_> {
+        MoveGenerator::new(self)
     }
 }
