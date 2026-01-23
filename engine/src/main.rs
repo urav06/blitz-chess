@@ -1,4 +1,4 @@
-use engine::board::{Board, Color, Piece, PieceType, Square, SquareExt};
+use engine::board::{Board, Color, Piece, PieceType, Square, SlotExt};
 
 fn main() {
     println!("=== Board API Test ===\n");

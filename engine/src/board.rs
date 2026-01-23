@@ -35,7 +35,7 @@ pub enum Lateral {
 
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq)]
-pub struct Piece(NonZeroU8);
+pub struct Piece(NonZeroU8);    // niche optimization
 
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -49,6 +49,12 @@ pub struct Board { squares: [Option<Piece>; 64] }
 // ============================================================================
 
 // --- Traits --- //
+impl Color {
+    pub const fn home_rank(self) -> u8 {
+        match self { Color::White => 0, Color::Black => 7 }
+    }
+}
+
 impl Not for Color {
     type Output = Self;
     fn not(self) -> Self {
@@ -165,7 +171,8 @@ impl Piece {
     // --- Construction --- //
     pub const fn new(piece_type: PieceType, color: Color) -> Self {
         let bits = Self::OCCUPIED_BIT | ((color as u8) << 3) | (piece_type as u8);
-        unsafe { Piece(NonZeroU8::new_unchecked(bits)) }  // OCCUPIED_BIT guarantees non-zero value
+        // SAFETY: OCCUPIED_BIT guarantees non-zero value
+        unsafe { Piece(NonZeroU8::new_unchecked(bits)) }
     }
 
     // --- Extraction --- //
@@ -205,12 +212,12 @@ impl Board {
 }
 
 // --- Traits --- //
-pub trait SquareExt {
+pub trait SlotExt {
     fn place(&mut self, piece: Piece) -> Option<Piece>;
     fn lift(&mut self) -> Option<Piece>;
 }
 
-impl SquareExt for Option<Piece> {
+impl SlotExt for Option<Piece> {
     fn place(&mut self, piece: Piece) -> Option<Piece> { self.replace(piece) }
     fn lift(&mut self) -> Option<Piece> { self.take() }
 }

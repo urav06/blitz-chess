@@ -1,6 +1,6 @@
 //! Castling types and logic.
 
-use crate::board::Color;
+use crate::board::{Color, Square};
 
 // ============================================================================
 // Type Definitions
@@ -42,6 +42,12 @@ impl CastlingSide {
         if file == Self::ROOK_SOURCES[Self::Queenside as usize] { return Some(Self::Queenside); }
         None
     }
+
+    /// Returns the castling side if this square is a rook's home square for the given color.
+    pub fn from_rook_square(square: Square, color: Color) -> Option<Self> {
+        if square.rank() != color.home_rank() { return None; }
+        Self::from_rook_file(square.file())
+    }
 }
 
 // ============================================================================
@@ -82,5 +88,13 @@ impl CastlingRights {
     pub const fn lose_all(self, color: Color) -> Self {
         self.lose(color, CastlingSide::Kingside)
             .lose(color, CastlingSide::Queenside)
+    }
+
+    /// Lose rights if the given square is a rook's home square for this color.
+    pub fn lose_for_rook_at(self, square: Square, color: Color) -> Self {
+        match CastlingSide::from_rook_square(square, color) {
+            Some(side) => self.lose(color, side),
+            None => self,
+        }
     }
 }

@@ -1,6 +1,6 @@
 //! Chess move representation. "move" is a reserved keyword in Rust, so we use "mv".
 
-use crate::board::{PieceType, Square};
+use crate::board::{Color, Piece, PieceType, Square};
 use crate::castling::CastlingSide;
 
 // ============================================================================
@@ -90,10 +90,13 @@ impl Move {
         MoveType::from_u8(((self.0 >> 14) & 0b11) as u8)
     }
 
-    pub const fn promotion_piece(self) -> Option<PieceType> {
+    pub const fn promoted_piece(self, color: Color) -> Piece {
         match self.move_type() {
-            MoveType::Promotion => Some(PieceType::from_u8(((self.0 >> 12) & 0b11) as u8)),
-            _ => None
+            MoveType::Promotion => {
+                let piece_type = PieceType::from_u8(((self.0 >> 12) & 0b11) as u8);
+                Piece::new(piece_type, color)
+            }
+            _ => unreachable!()
         }
     }
 
