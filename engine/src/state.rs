@@ -1,6 +1,6 @@
 //! Chess game state.
 
-use crate::board::{Board, Color, Lateral, Piece, Square, SlotExt};
+use crate::board::{Board, Color, Lateral, Piece, SlotExt, Square};
 use crate::castling::CastlingRights;
 use crate::mobility::MoveGenerator;
 use crate::mv::{Move, MoveType};
@@ -20,20 +20,31 @@ pub struct State {
 }
 
 // ============================================================================
-// State — Move Application
+// State
 // ============================================================================
 
 impl State {
+    // --- Construction --- //
+    pub fn new(board: Board, to_move: Color, castling_rights: CastlingRights) -> Self {
+        State {
+            board,
+            to_move,
+            castling_rights,
+            en_passant: None,
+            halfmove_clock: 0,
+            fullmove_number: 1,
+        }
+    }
 
     // --- Move Application --- //
     pub fn apply_move(mut self, mv: Move) -> Self {
-        let piece = self.board[mv.source()].unwrap();
+        let piece = self.board[mv.source()].expect("source square must be occupied");
         let captured = self.execute_board(mv);
 
         self.en_passant = self.resulting_en_passant(mv, piece);
         self.castling_rights = self.resulting_castling(mv, piece);
         self.halfmove_clock = self.resulting_halfmove(piece, captured.is_some());
-        
+
         self.fullmove_number += (self.to_move == Color::Black) as u16;
         self.to_move = !self.to_move;
 
@@ -61,20 +72,30 @@ impl State {
 
     // --- State Derivations --- //
     fn resulting_en_passant(&self, mv: Move, piece: Piece) -> Option<Square> {
-        if !piece.is_pawn() { return None; }
-        if (mv.target() - mv.source()).0.abs() != 2 { return None; }
+        if !piece.is_pawn() {
+            return None;
+        }
+        if mv.target().rank().abs_diff(mv.source().rank()) != 2 {
+            return None;
+        }
         mv.source().forward(self.to_move, 1, Lateral::Straight)
     }
 
     fn resulting_castling(&self, mv: Move, piece: Piece) -> CastlingRights {
-        if piece.is_king() { return self.castling_rights.lose_all(self.to_move); }
+        if piece.is_king() {
+            return self.castling_rights.lose_all(self.to_move);
+        }
         self.castling_rights
             .lose_for_rook_at(mv.source(), self.to_move)
             .lose_for_rook_at(mv.target(), !self.to_move)
     }
 
     fn resulting_halfmove(&self, piece: Piece, was_capture: bool) -> u8 {
-        if piece.is_pawn() || was_capture { 0 } else { self.halfmove_clock + 1 }
+        if piece.is_pawn() || was_capture {
+            0
+        } else {
+            self.halfmove_clock + 1
+        }
     }
 }
 
